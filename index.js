@@ -2,7 +2,7 @@ const fs = require('fs')
 const path = require('path')
 const mkdirp = require('mkdirp')
 const prettier = require('prettier')
-
+const { getTypeWithGenericType } = require('./utils')
 const fsp = fs.promises
 function isEmpty(value) {
   return value == undefined || value === ''
@@ -26,6 +26,8 @@ const TypeMap = {
   string: 'string',
   number: 'number',
 }
+
+const simpleTypeList = ['string', 'number', 'integer']
 
 class Template {
   constructor(docs) {
@@ -60,22 +62,37 @@ class Template {
   getTypeParams() {
     const { params } = this.currentDoc
     if (!params || !params.length === 0) {
-      return
+      return {}
     }
-    let bodyParams = 'any'
+    let bodyParams = ''
     const queryParams = []
+    const pathParams = []
     for (let param of params) {
       if (param.in === 'query') {
+        // 对于查询参数，重写其type
         queryParams.push({
           ...param,
           type: TypeMap[param.type],
         })
       }
+      // 对于body参数，获取其类型定义
       if (param.in === 'body') {
-        bodyParams = `defs.${param.schema.originalRef}`
+        const ref = param.schema.$ref
+        const { type, generic } = getTypeWithGenericType(ref.replace('#/definitions/', ''))
+        bodyParams = generic ? `defs.${type}<${generic}>` : `defs.${type}`
+      }
+      if (param.in === 'path') {
+        pathParams.push({
+          ...param,
+          type: TypeMap[param.type]
+        })
       }
     }
-    return [queryParams, bodyParams]
+    return {
+      queryParams,
+      bodyParams,
+      pathParams
+    }
   }
   getTypeQueryParams(paramsList) {
     if (!paramsList || paramsList.length === 0) {
@@ -90,6 +107,31 @@ class Template {
       `
       })
       .join('')
+  }
+  getUrl() {
+    const { pathParams } = this.getTypeParams()
+    if (!pathParams) {
+      return this.currentDoc.url
+    } else {
+      let url = this.currentDoc.url
+      for (const param of pathParams) {
+        url = url.replace(`{${param.name}}`, `\$\{path.${param.name}\}`)
+      }
+      return url
+    }
+  }
+  getResponseType() {
+    const okResponse = this.currentDoc.doc.responses['200']
+    if (okResponse.type) {
+      return okResponse.schema.type
+    }
+    const ref = okResponse.schema.$ref
+    const { type, generic } = getTypeWithGenericType(ref.replace('#/definitions/', ''))
+    if (generic) {
+      const genericStr = simpleTypeList.includes(generic) ? generic : `defs.${generic}`
+      return `defs.${type}<${genericStr}>`
+    }
+    return simpleTypeList.includes(type) ? type : `defs.${type}`
   }
   getTemplateContent(doc) {
     console.warn('使用预定义的`getTemplateContent`将无法输出结果')
