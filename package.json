@@ -4,7 +4,8 @@
   "description": "A render template used by sv-builder",
   "main": "index.js",
   "files": [
-    "index.js"
+    "index.js",
+    "utils.js"
   ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
